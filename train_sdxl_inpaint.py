@@ -293,6 +293,12 @@ class Text2ImageDataset:
         pin_memory: bool = False,
         persistent_workers: bool = False,
     ):
+        use_hq = train_shards_path_or_url == 'hq'
+        if use_hq:
+            import yaml
+            with open('/fsx/william/suraj-inpainting-script/hq.yaml', 'r') as file:
+                train_shards_path_or_url = yaml.safe_load(file)
+
         if not isinstance(train_shards_path_or_url, str):
             train_shards_path_or_url = [list(braceexpand(urls)) for urls in train_shards_path_or_url]
             # flatten list using itertools
@@ -323,6 +329,10 @@ class Text2ImageDataset:
 
             # resize image
             image = example["image"]
+
+            if use_hq:
+                example["orig_size"] = (image.width, image.height)
+
             image = TF.resize(image, resolution, interpolation=transforms.InterpolationMode.BILINEAR)
 
             # get crop coordinates and crop image
@@ -341,16 +351,27 @@ class Text2ImageDataset:
 
             return example
 
-        processing_pipeline = [
-            wds.decode("pil", handler=wds.ignore_and_continue),
-            wds.rename(
-                image="jpg;png;jpeg;webp", text="text;txt;caption", orig_size="json", handler=wds.warn_and_continue
-            ),
-            wds.map(filter_keys({"image", "text", "orig_size"})),
-            wds.map_dict(orig_size=get_orig_size),
-            wds.map(transform),
-            wds.to_tuple("image", "mask", "masked_image", "text", "orig_size", "crop_coords"),
-        ]
+        if use_hq:
+            processing_pipeline = [
+                wds.decode("pil", handler=wds.ignore_and_continue),
+                wds.rename(
+                    image="jpg;png;jpeg;webp", text="text;txt;caption", handler=wds.warn_and_continue
+                ),
+                wds.map(filter_keys({"image", "text"})),
+                wds.map(transform),
+                wds.to_tuple("image", "mask", "masked_image", "text", "orig_size", "crop_coords"),
+            ]
+        else:
+            processing_pipeline = [
+                wds.decode("pil", handler=wds.ignore_and_continue),
+                wds.rename(
+                    image="jpg;png;jpeg;webp", text="text;txt;caption", orig_size="json", handler=wds.warn_and_continue
+                ),
+                wds.map(filter_keys({"image", "text", "orig_size"})),
+                wds.map_dict(orig_size=get_orig_size),
+                wds.map(transform),
+                wds.to_tuple("image", "mask", "masked_image", "text", "orig_size", "crop_coords"),
+            ]
 
         # Create train dataset and loader
         pipeline = [
